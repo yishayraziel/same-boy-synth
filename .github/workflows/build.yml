@@ -1,0 +1,66 @@
+name: Build Same Boy
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            name: mac
+          - os: windows-latest
+            name: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: cmake --build build --config Release --target SameBoy_VST3 SameBoy_AU SameBoy_Standalone -j 4
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: cmake --build build --config Release --target SameBoy_VST3 SameBoy_Standalone -j 4
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -e
+          A=build/SameBoy_artefacts/Release
+          codesign --force --deep -s - "$A/VST3/Same Boy.vst3"
+          codesign --force --deep -s - "$A/AU/Same Boy.component"
+          codesign --force --deep -s - "$A/Standalone/Same Boy.app"
+          mkdir -p dist/root/Library/Audio/Plug-Ins/VST3 dist/root/Library/Audio/Plug-Ins/Components
+          cp -R "$A/VST3/Same Boy.vst3" dist/root/Library/Audio/Plug-Ins/VST3/
+          cp -R "$A/AU/Same Boy.component" dist/root/Library/Audio/Plug-Ins/Components/
+          pkgbuild --root dist/root --identifier com.yraziel.sameboy.pkg --version 1.0.0 \
+                   --install-location / "dist/Same Boy 1.0 Installer.pkg"
+          mkdir -p dist/zip
+          cp -R "$A/VST3/Same Boy.vst3" "$A/AU/Same Boy.component" "$A/Standalone/Same Boy.app" dist/zip/
+          cp "dist/Same Boy 1.0 Installer.pkg" dist/zip/
+          cp packaging/README-mac.txt dist/zip/README.txt
+          cd dist/zip && ditto -c -k --keepParent . "../SameBoy-mac.zip"
+          file "../../$A/VST3/Same Boy.vst3/Contents/MacOS/Same Boy"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $A = "build/SameBoy_artefacts/Release"
+          New-Item -ItemType Directory -Force dist/zip | Out-Null
+          Copy-Item -Recurse "$A/VST3/Same Boy.vst3" dist/zip/
+          Copy-Item "$A/Standalone/Same Boy.exe" dist/zip/
+          Copy-Item packaging/README-windows.txt dist/zip/README.txt
+          Compress-Archive -Path dist/zip/* -DestinationPath dist/SameBoy-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SameBoy-${{ matrix.name }}
+          path: dist/SameBoy-${{ matrix.name }}.zip
