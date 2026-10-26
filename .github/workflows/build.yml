@@ -64,3 +64,31 @@ jobs:
         with:
           name: SameBoy-${{ matrix.name }}
           path: dist/SameBoy-${{ matrix.name }}.zip
+
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: art
+          merge-multiple: true
+      - name: Push builds branch
+        run: |
+          set -e
+          mkdir out && cp art/*.zip out/ && cd out
+          git init -q -b builds
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A && git commit -qm "Builds for ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" builds
+      - name: Update "latest" release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest -y --cleanup-tag -R "$GITHUB_REPOSITORY" || true
+          gh release create latest art/*.zip -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Same Boy (latest build)" --notes "Automatic build of ${GITHUB_SHA}. Mac: universal VST3 + AU + .pkg installer. Windows: x64 VST3."
